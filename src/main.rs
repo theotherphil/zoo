@@ -7,17 +7,26 @@ fn var(name: &str) -> Term {
 fn main() {
     let db = vec![
         // sibling(X,Y) :- child(X,Z), child(Y,Z).
-        (Atom::new("sibling".into(), vec![var("X"), var("Y")]), vec![
-            Atom::new("child".into(), vec![var("X"), var("Z")]),
-            Atom::new("child".into(), vec![var("Y"), var("Z")])
-        ]),
+        Assertion::new(
+            Atom::new("sibling".into(), vec![var("X"), var("Y")]),
+            Clause::new(vec![
+                Atom::new("child".into(), vec![var("X"), var("Z")]),
+                Atom::new("child".into(), vec![var("Y"), var("Z")])
+            ])
+        ),
         // child("luke", "vader")
-        (Atom::new("child".into(), vec![var("luke"), var("vader")]), vec![]),
+        Assertion::new(
+            Atom::new("child".into(), vec![var("luke"), var("vader")]),
+            Clause::empty()
+        ),
         // child("leia", "vader")
-        (Atom::new("child".into(), vec![var("leia"), var("vader")]), vec![])
+        Assertion::new(
+            Atom::new("child".into(), vec![var("leia"), var("vader")]),
+            Clause::empty()
+        )
     ];
     // ?- sibling(X, Y).
-    let clause = vec![Atom::new("sibling".into(), vec![var("X"), var("Y")])];
+    let clause = Clause::new(vec![Atom::new("sibling".into(), vec![var("X"), var("Y")])]);
     solve_top_level(clause, db).unwrap();
 }
 
@@ -63,11 +72,36 @@ impl Atom {
 }
 
 // A conjunction of atomic propositions
-type Clause = Vec<Atom>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Clause { conjuncts: Vec<Atom> }
+
+impl Clause {
+    fn new(conjuncts: Vec<Atom>) -> Clause {
+        Clause { conjuncts }
+    }
+
+    fn empty() -> Clause {
+        Clause { conjuncts: vec![] }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.conjuncts.len() == 0
+    }
+}
 
 // (a, b1, .., bn) is a Horn formula
 // (b1 & .. bn) => a
-type Assertion = (Atom, Clause);
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Assertion {
+    head: Atom,
+    body: Clause
+}
+
+impl Assertion {
+    fn new(head: Atom, body: Clause) -> Assertion {
+        Assertion { head, body }
+    }
+}
 
 // The current values of variables
 type Environment = Vec<(Variable, Term)>;
@@ -304,11 +338,11 @@ fn reduce_atom(a: Atom, env: Environment, db: Database, n: i32) -> Option<(Datab
     if db.len() == 0 {
             None
     } else {
-        let (b, lst) = &db[0];
+        let Assertion { head: b, body: lst } = &db[0];
         let rest = db.clone().into_iter().skip(1).collect::<Vec<_>>();
         let maybe_new_env = unify_atoms(&env, &a, &renumber_atom(n, b));
         match maybe_new_env {
-            Ok(new_env) => Some((rest, new_env, lst.iter().map(|l| renumber_atom(n, l)).collect::<Vec<_>>())),
+            Ok(new_env) => Some((rest, new_env, Clause::new(lst.conjuncts.iter().map(|l| renumber_atom(n, l)).collect::<Vec<_>>()))),
             Err(_) => reduce_atom(a, env, rest, n)
         }
     }
@@ -316,15 +350,15 @@ fn reduce_atom(a: Atom, env: Environment, db: Database, n: i32) -> Option<(Datab
 
 // Searches for a proof of clause c.
 fn solve(ch: &[Choice], db: Database, env: Environment, c: Clause, n: i32) -> Result<(), NoSolution> {
-    println!("C LENGTH = {}. n = {}", c.len(), n);
+    println!("C LENGTH = {}. n = {}", c.conjuncts.len(), n);
 
-    if c.len() == 0 {
+    if c.is_empty() {
         // All atoms are solved, we found a solution
         return display_solution(ch, &env);
     }
 
-    let a = c[0].clone();
-    let cp = c.clone().into_iter().skip(1).collect::<Vec<_>>();
+    let a = c.conjuncts[0].clone();
+    let cp = c.clone().conjuncts.into_iter().skip(1).collect::<Vec<_>>();
 
     // Reduce the first atom in the clause
     match reduce_atom(a, env.clone(), db.clone(), n) {
@@ -337,7 +371,7 @@ fn solve(ch: &[Choice], db: Database, env: Environment, c: Clause, n: i32) -> Re
             // the subgoals added to the list of goals.
             let mut new_ch = ch.iter().map(|x| x.clone()).collect::<Vec<_>>();
             new_ch.insert(0, (new_db, env.clone(), c, n));
-            d.extend(cp);
+            d.conjuncts.extend(cp);
             solve(&new_ch, db.clone(), new_env, d, n + 1)
         }
     }
