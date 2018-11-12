@@ -1,24 +1,23 @@
 
 
-
 fn var(name: &str) -> Term {
-    Term::Var((name.into(), 0))
+    Term::Var(Variable::new(name, 0))
 }
 
 fn main() {
     let db = vec![
         // sibling(X,Y) :- child(X,Z), child(Y,Z).
-        (("sibling".into(), vec![var("X"), var("Y")]), vec![
-            ("child".into(), vec![var("X"), var("Z")]),
-            ("child".into(), vec![var("Y"), var("Z")])
+        (Atom::new("sibling".into(), vec![var("X"), var("Y")]), vec![
+            Atom::new("child".into(), vec![var("X"), var("Z")]),
+            Atom::new("child".into(), vec![var("Y"), var("Z")])
         ]),
         // child("luke", "vader")
-        (("child".into(), vec![var("luke"), var("vader")]), vec![]),
+        (Atom::new("child".into(), vec![var("luke"), var("vader")]), vec![]),
         // child("leia", "vader")
-        (("child".into(), vec![var("leia"), var("vader")]), vec![])
+        (Atom::new("child".into(), vec![var("leia"), var("vader")]), vec![])
     ];
     // ?- sibling(X, Y).
-    let clause = vec![("sibling".into(), vec![var("X"), var("Y")])];
+    let clause = vec![Atom::new("sibling".into(), vec![var("X"), var("Y")])];
     solve_top_level(clause, db).unwrap();
 }
 
@@ -31,7 +30,17 @@ type Constant = String;
 // When the proof search depth is n, all variables
 // that we need to use are renamed from (x, 0) to
 // (x, n)
-type Variable = (String, i32);
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Variable {
+    name: String,
+    depth: i32
+}
+
+impl Variable {
+    fn new(name: impl Into<String>, depth: i32) -> Variable {
+        Variable { name: name.into(), depth: depth }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Term {
@@ -41,7 +50,17 @@ enum Term {
 }
 
 // Atomic proposition. p(t1, .., tn)
-type Atom = (Constant, Vec<Term>);
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Atom {
+    sym: Constant,
+    terms: Vec<Term>
+}
+
+impl Atom {
+    fn new(sym: Constant, terms: Vec<Term>) -> Atom {
+        Atom { sym, terms }
+    }
+}
 
 // A conjunction of atomic propositions
 type Clause = Vec<Atom>;
@@ -73,18 +92,18 @@ fn lookup(env: Environment, x: Variable) -> Term {
 #[test]
 fn test_lookup_found() {
     let env = vec![
-        (("X".into(), 0), Term::Const("value".into()))
+        (Variable::new("X", 0), Term::Const("value".into()))
     ];
-    let x = ("X".into(), 0);
+    let x = Variable::new("X", 0);
     assert_eq!(lookup(env, x), Term::Const("value".into()));
 }
 
 #[test]
 fn test_lookup_not_found() {
     let env = vec![
-        (("X".into(), 0), Term::Const("value".into()))
+        (Variable::new("X", 0), Term::Const("value".into()))
     ];
-    let y = ("Y".into(), 0);
+    let y = Variable::new("Y", 0);
     assert_eq!(lookup(env, y.clone()), Term::Var(y.clone()));
 }
 
@@ -118,8 +137,8 @@ fn subst_term(env: &Environment, t: &Term) -> Term {
 // Converts a term t to its string representation
 fn string_of_term(t: &Term) -> String {
     match t {
-        Term::Var((v, 0)) => v.clone(),
-        Term::Var((v, n)) => format!("{}{}", v, n),
+        Term::Var(Variable { name: v, depth: 0 }) => v.clone(),
+        Term::Var(Variable { name: v, depth: n })  => format!("{}{}", v, n),
         Term::Const(c) => c.clone(),
         Term::App(f, ts) => {
             let args: Vec<String> = ts.iter().map(string_of_term).collect();
@@ -131,13 +150,13 @@ fn string_of_term(t: &Term) -> String {
 // Converts an environment to it its string representation,
 // only keeping variables at level 0
 fn string_of_env(env: &Environment) -> String {
-    let env = env.clone().into_iter().filter(|((_, n), _)| *n == 0).collect::<Vec<_>>();
+    let env = env.clone().into_iter().filter(|(Variable { name: _, depth: n }, _)| *n == 0).collect::<Vec<_>>();
     if env.len() == 0 {
         String::from("Yes")
     } else {
         env.iter()
             .rev()
-            .map(|((x, _), t)| format!(
+            .map(|(Variable { name: x, depth: _ }, t)| format!(
                 "{} = {}",
                 x,
                 string_of_term(&subst_term(&env, t)
@@ -207,8 +226,8 @@ fn unify_lists(env: &Environment, lst1: Vec<Term>, lst2: Vec<Term>) -> Result<En
 
 // Unifies atomic propositions in current environment
 fn unify_atoms(env: &Environment, a1: &Atom, a2: &Atom) -> Result<Environment, NoUnify> {
-    let (c1, ts1) = a1;
-    let (c2, ts2) = a2;
+    let Atom { sym: c1, terms: ts1 } = a1;
+    let Atom { sym: c2, terms: ts2 } = a2;
 
     if c1 == c2 {
         unify_lists(env, ts1.clone(), ts2.clone())
@@ -227,7 +246,7 @@ struct NoSolution;
 // Renumbers all variable instances occurring in a term so that they have level n
 fn renumber_term(n: i32, t: &Term) -> Term {
     match t {
-        Term::Var((x, _)) => Term::Var((x.clone(), n)),
+        Term::Var(Variable { name: x, depth: _ }) => Term::Var(Variable::new(x.clone(), n)),
         Term::Const(x) => Term::Const(x.clone()),
         Term::App(c, ts) => Term::App(c.clone(), ts.iter().map(|u| renumber_term(n, u)).collect())
     }
@@ -235,8 +254,8 @@ fn renumber_term(n: i32, t: &Term) -> Term {
 
 // Renumbers all variable instances occurring in an atom so that they have level n
 fn renumber_atom(n: i32, a: &Atom) -> Atom {
-    let (c, ts) = a;
-    (c.clone(), ts.iter().map(|t| renumber_term(n, t)).collect())
+    let Atom { sym: c, terms: ts } = a;
+    Atom::new(c.clone(), ts.iter().map(|t| renumber_term(n, t)).collect())
 }
 
 // Displays the solution of a goal encoded by env. Gives the user the option to search
