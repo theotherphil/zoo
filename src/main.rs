@@ -17,9 +17,9 @@ fn main() {
         // child("leia", "vader")
         (("child".into(), vec![var("leia"), var("vader")]), vec![])
     ];
-    // ?- sibling(A,B).
+    // ?- sibling(X, Y).
     let clause = vec![("sibling".into(), vec![var("X"), var("Y")])];
-    solve_top_level(clause, db);
+    solve_top_level(clause, db).unwrap();
 }
 
 // String starting with a lower case letter
@@ -70,10 +70,32 @@ fn lookup(env: Environment, x: Variable) -> Term {
         .map_or(Term::Var(x), |vt| vt.1.clone())
 }
 
+#[test]
+fn test_lookup_found() {
+    let env = vec![
+        (("X".into(), 0), Term::Const("value".into()))
+    ];
+    let x = ("X".into(), 0);
+    assert_eq!(lookup(env, x), Term::Const("value".into()));
+}
+
+#[test]
+fn test_lookup_not_found() {
+    let env = vec![
+        (("X".into(), 0), Term::Const("value".into()))
+    ];
+    let y = ("Y".into(), 0);
+    assert_eq!(lookup(env, y.clone()), Term::Var(y.clone()));
+}
+
 // subst_term(sub, t) subsitutes variables in term t for values
 // specified by sub. It substitutes repeatedly until the terms
 // stop changing, as needed during unification
 fn subst_term(env: &Environment, t: &Term) -> Term {
+    println!("SUBST_TERM");
+    println!("  env: {:?}", env);
+    println!("  t: {:?}", t);
+
     match t {
         Term::Var(x) => {
             let e = lookup(env.clone(), x.clone());
@@ -135,12 +157,18 @@ fn occurs(x: &Variable, t: &Term) -> bool {
     }
 }
 
+#[derive(Debug)]
 struct NoUnify;
 
 // Unifies terms t1 and t2 in the current environment.
 // On success it returns the environment extended with the result of 
 // unification. On failure it returns None.
 fn unify_terms(env: &Environment, t1: &Term, t2: &Term) -> Result<Environment, NoUnify> {
+    println!("UNIFY_TERMS");
+    println!("  env: {:?}", env);
+    println!("  t1: {:?}", t1);
+    println!("  t2: {:?}", t2);
+
     let s1 = subst_term(env, t1);
     let s2 = subst_term(env, t2);
 
@@ -193,6 +221,7 @@ fn unify_atoms(env: &Environment, a1: &Atom, a2: &Atom) -> Result<Environment, N
 // for another solution for a clause. Final item is the search depth
 type Choice = (Database, Environment, Clause, i32);
 
+#[derive(Debug)]
 struct NoSolution;
 
 // Renumbers all variable instances occurring in a term so that they have level n
@@ -214,6 +243,8 @@ fn renumber_atom(n: i32, a: &Atom) -> Atom {
 // for other solutions, as described by the list of choice points ch, to to abort the
 // current proof search
 fn display_solution(ch: &[Choice], env: &Environment) -> Result<(), NoSolution> {
+    println!("ENV IS: {:?}", env);
+
     let env_str = string_of_env(env);
     if env_str == "Yes" {
         println!("Yes");
@@ -245,7 +276,13 @@ fn continue_search(ch: &[Choice]) -> Result<(), NoSolution> {
 // conclusion matches a. It returns None if the atom cannot be reduced, or the
 // remaining assertions, new environment and list of subgoals if it can.
 fn reduce_atom(a: Atom, env: Environment, db: Database, n: i32) -> Option<(Database, Environment, Clause)> {
-     if db.len() == 0 {
+    println!("REDUCE_ATOM");
+    println!("  a: {:?}", a);
+    println!("  env: {:?}", env);
+    println!("  db: {:?}", db);
+    println!("  n: {}", n);
+
+    if db.len() == 0 {
             None
     } else {
         let (b, lst) = &db[0];
@@ -260,6 +297,8 @@ fn reduce_atom(a: Atom, env: Environment, db: Database, n: i32) -> Option<(Datab
 
 // Searches for a proof of clause c.
 fn solve(ch: &[Choice], db: Database, env: Environment, c: Clause, n: i32) -> Result<(), NoSolution> {
+    println!("C LENGTH = {}. n = {}", c.len(), n);
+
     if c.len() == 0 {
         // All atoms are solved, we found a solution
         return display_solution(ch, &env);
